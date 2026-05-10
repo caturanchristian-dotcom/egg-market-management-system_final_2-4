@@ -102,6 +102,7 @@ async function startServer() {
       category_id INT NOT NULL,
       image_url TEXT,
       is_deleted TINYINT(1) DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       INDEX (farmer_id),
       INDEX (category_id),
       FOREIGN KEY (farmer_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -159,7 +160,16 @@ async function startServer() {
       console.log('Migration: Adding verification_document to users table...');
       await db.execute('ALTER TABLE users ADD COLUMN verification_document TEXT');
     }
-    console.log('Migration: User verification columns verified.');
+
+    // Migration: Add created_at to products table
+    const productColumns = await db.query('SHOW COLUMNS FROM products');
+    const productColumnNames = productColumns.map((c: any) => (c.Field || c.field || c.Column_name || ''));
+    if (!productColumnNames.includes('created_at')) {
+      console.log('Migration: Adding created_at to products table...');
+      await db.execute("ALTER TABLE products ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+    }
+
+    console.log('Migration: Database schema verified.');
   } catch (err) {
     console.error('Migration check for verification columns failed:', err);
   }
@@ -1169,6 +1179,52 @@ async function startServer() {
     } catch (err: any) {
       console.error('Admin stats error:', err);
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * GET /api/admin/activity
+   * Returns a refined timeline of recent platform interactions for the dashboard feed
+   */
+  app.get('/api/admin/activity', isAdmin, async (req, res) => {
+    try {
+      // Aggregating 4 major activity types into a unified feed
+      const activity = await db.query(`
+        (SELECT 
+          CONVERT('user_signup' USING utf8mb4) as type, 
+          CONVERT(name USING utf8mb4) as message, 
+          CONVERT(role USING utf8mb4) as meta,
+          created_at 
+         FROM users)
+        UNION ALL
+        (SELECT 
+          CONVERT('order_placed' USING utf8mb4) as type, 
+          CONVERT(CONCAT('Order #', id) USING utf8mb4) as message, 
+          CONVERT(total_amount USING utf8mb4) as meta,
+          created_at 
+         FROM orders)
+        UNION ALL
+        (SELECT 
+          CONVERT('product_added' USING utf8mb4) as type, 
+          CONVERT(name USING utf8mb4) as message, 
+          CONVERT(price_per_tray USING utf8mb4) as meta,
+          created_at 
+         FROM products)
+        UNION ALL
+        (SELECT 
+          CONVERT('farmer_verified' USING utf8mb4) as type, 
+          CONVERT(name USING utf8mb4) as message, 
+          CONVERT(verification_status USING utf8mb4) as meta,
+          created_at 
+         FROM users 
+         WHERE role = 'farmer' AND verification_status = 'verified')
+        ORDER BY created_at DESC
+        LIMIT 15
+      `);
+      res.json(activity);
+    } catch (err: any) {
+      console.error('Admin activity fetch error:', err);
+      res.status(500).json({ error: 'Failed to fetch activity feed' });
     }
   });
 
