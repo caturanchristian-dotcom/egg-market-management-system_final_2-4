@@ -1220,6 +1220,16 @@ export default function AdminDashboard() {
               placeholder="Describe the platform..."
             />
           </div>
+          <div className="space-y-2">
+            <label className="text-sm font-bold text-emerald-700">Facebook Page URL</label>
+            <input 
+              type="url" 
+              value={settingsForm?.facebook_url || ''}
+              onChange={(e) => setSettingsForm({ ...settingsForm, facebook_url: e.target.value })}
+              className="w-full px-4 py-3 bg-emerald-50 border border-emerald-100 rounded-2xl focus:ring-2 focus:ring-emerald-500 outline-none"
+              placeholder="https://facebook.com/yourpage"
+            />
+          </div>
           
           <div className="pt-6 border-t border-emerald-50">
             <button 

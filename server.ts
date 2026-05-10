@@ -119,6 +119,7 @@ async function startServer() {
     INSERT IGNORE INTO settings (\`key\`, value) VALUES ('contact_email', 'caturanchristian@gmail.com');
     INSERT IGNORE INTO settings (\`key\`, value) VALUES ('site_name', 'EggMarket');
     INSERT IGNORE INTO settings (\`key\`, value) VALUES ('site_description', 'Connecting local farmers with fresh egg lovers. Our mission is to provide the freshest eggs while supporting local agriculture.');
+    INSERT IGNORE INTO settings (\`key\`, value) VALUES ('facebook_url', 'https://facebook.com/eggmarket');
   `);
 
   // Migration: Ensure latitude and longitude columns exist if they were added later

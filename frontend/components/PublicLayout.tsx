@@ -13,7 +13,8 @@ export default function PublicLayout({ children }: PublicLayoutProps) {
     contact_phone: '09350347461',
     contact_email: 'caturanchristian@gmail.com',
     site_name: 'Egg Market System',
-    site_description: 'Connecting local farmers with fresh egg lovers. Our mission is to provide the freshest eggs while supporting local agriculture.'
+    site_description: 'Connecting local farmers with fresh egg lovers. Our mission is to provide the freshest eggs while supporting local agriculture.',
+    facebook_url: 'https://facebook.com/eggmarket'
   });
 
   useEffect(() => {
@@ -55,7 +56,12 @@ export default function PublicLayout({ children }: PublicLayoutProps) {
                 {settings.site_description}
               </p>
               <div className="flex gap-4">
-                <a href="#" className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center hover:bg-emerald-600 transition-all">
+                <a 
+                  href={settings.facebook_url || "#"} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center hover:bg-emerald-600 transition-all"
+                >
                   <Facebook size={20} />
                 </a>
                 <a href="#" className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center hover:bg-emerald-600 transition-all">
