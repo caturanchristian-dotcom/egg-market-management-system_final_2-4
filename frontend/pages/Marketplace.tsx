@@ -473,7 +473,8 @@ export default function Marketplace() {
                               </button>
                             </div>
                             <button 
-                              onClick={() => {
+                              onClick={(e) => {
+                                if (e && e.stopPropagation) e.stopPropagation();
                                 setProductToRemove({ id: item.product.id });
                                 setShowRemoveConfirm(true);
                               }}

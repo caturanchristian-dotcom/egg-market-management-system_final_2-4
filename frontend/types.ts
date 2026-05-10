@@ -53,6 +53,7 @@ export interface Product {
   category_id: number;
   category_name?: string;
   image_url: string;
+  total_sold?: number;
 }
 
 /**

@@ -13,7 +13,8 @@ import {
   Truck,
   ShoppingBag,
   MessageSquare,
-  MapPin
+  MapPin,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../contexts/AuthContext';
@@ -46,6 +47,10 @@ export default function CustomerDashboard() {
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]); // Items associated with the selected order
   const [loading, setLoading] = useState(true);
   
+  // Date filter state
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  
   // Local form state for profile management
   const [profileData, setProfileData] = useState({ 
     name: '', 
@@ -58,6 +63,10 @@ export default function CustomerDashboard() {
   // Cancellation workflow state
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [orderToCancel, setOrderToCancel] = useState<number | null>(null);
+  
+  // Deletion workflow state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [orderToDelete, setOrderToDelete] = useState<number | null>(null);
 
   /**
    * Sync local form state with global auth context
@@ -84,7 +93,13 @@ export default function CustomerDashboard() {
    */
   const fetchOrders = async () => {
     try {
-      const response = await fetch(`/api/orders/customer/${user?.id}`);
+      let url = `/api/orders/customer/${user?.id}`;
+      const params = new URLSearchParams();
+      if (startDate) params.append('startDate', startDate);
+      if (endDate) params.append('endDate', endDate);
+      if (params.toString()) url += `?${params.toString()}`;
+
+      const response = await fetch(url);
       if (!response.ok) throw new Error('Failed to fetch orders');
       const data = await response.json();
       setOrders(Array.isArray(data) ? data : []);
@@ -94,6 +109,42 @@ export default function CustomerDashboard() {
       setLoading(false);
     }
   };
+
+  const handleDeleteOrder = (e: React.MouseEvent | any, orderId: number) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    setOrderToDelete(orderId);
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDeleteOrder = async () => {
+    if (!orderToDelete) return;
+    
+    try {
+      const response = await fetch(`/api/orders/${orderToDelete}`, {
+        method: 'DELETE',
+      });
+      
+      if (response.ok) {
+        showNotify('Order record deleted successfully', 'success');
+        fetchOrders();
+        setShowDeleteConfirm(false);
+        setOrderToDelete(null);
+        setSelectedOrder(null);
+      } else {
+        const error = await response.json();
+        showNotify(error.error || 'Failed to delete order', 'error');
+      }
+    } catch (err) {
+      console.error('Error deleting order:', err);
+      showNotify('Error occurred while deleting', 'error');
+    }
+  };
+
+  useEffect(() => {
+    if (user) {
+      fetchOrders();
+    }
+  }, [startDate, endDate]);
 
   /**
    * Drills down into a specific order to retrieve product-level details
@@ -213,7 +264,7 @@ export default function CustomerDashboard() {
               <div className="flex items-center gap-6">
                 <div className="text-right">
                   <p className="text-xs text-emerald-400 uppercase font-bold tracking-wider">Total</p>
-                  <p className="font-bold text-emerald-900">₱{order.total_amount.toFixed(2)}</p>
+                  <p className="font-bold text-emerald-900">₱{Number(order.total_amount).toFixed(2)}</p>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className={`text-[10px] font-bold uppercase px-3 py-1 rounded-full ${
@@ -225,6 +276,15 @@ export default function CustomerDashboard() {
                   }`}>
                     {order.status}
                   </span>
+                  {(order.status === 'delivered' || order.status === 'cancelled') && (
+                    <button 
+                      onClick={(e) => handleDeleteOrder(e, order.id)}
+                      className="p-2 text-red-400 hover:bg-red-50 rounded-xl transition-all"
+                      title="Delete History Record"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  )}
                   <ChevronRight size={20} className="text-emerald-300 group-hover:translate-x-1 transition-transform" />
                 </div>
               </div>
@@ -254,11 +314,44 @@ export default function CustomerDashboard() {
   return (
     <DashboardLayout activeTab={activeTab} setActiveTab={setActiveTab}>
       <div className="space-y-8">
-        <div className="flex justify-between items-center">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <h1 className="text-3xl font-bold text-emerald-900">
             {activeTab === 'my-orders' ? 'Active Orders' : 
              activeTab === 'history' ? 'Purchase History' : 'Profile Settings'}
           </h1>
+
+          {(activeTab === 'my-orders' || activeTab === 'history') && (
+            <div className="flex flex-wrap items-center gap-3 bg-white p-2 rounded-2xl border border-emerald-100 shadow-sm w-full md:w-auto">
+              <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 rounded-xl">
+                <Clock size={16} className="text-emerald-600" />
+                <span className="text-xs font-bold text-emerald-700 uppercase">Filter</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input 
+                  type="date" 
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="bg-transparent text-xs font-bold text-emerald-900 outline-none p-1"
+                />
+                <span className="text-emerald-300 text-xs">to</span>
+                <input 
+                  type="date" 
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="bg-transparent text-xs font-bold text-emerald-900 outline-none p-1"
+                />
+                {(startDate || endDate) && (
+                  <button 
+                    onClick={() => { setStartDate(''); setEndDate(''); }}
+                    className="p-1 hover:bg-red-50 text-red-400 rounded-lg transition-all"
+                    title="Clear Filter"
+                  >
+                    <XCircle size={16} />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {activeTab === 'my-orders' && (
@@ -377,6 +470,18 @@ export default function CustomerDashboard() {
         title="Cancel Order"
         message="Are you sure you want to cancel this order? This action cannot be undone."
         confirmText="Cancel Order"
+      />
+
+      <ConfirmationModal
+        isOpen={showDeleteConfirm}
+        onClose={() => {
+          setShowDeleteConfirm(false);
+          setOrderToDelete(null);
+        }}
+        onConfirm={confirmDeleteOrder}
+        title="Delete Order History"
+        message="Are you sure you want to delete this order from your history? This action cannot be undone."
+        confirmText="Delete"
       />
 
       {/* Order Details Modal */}
@@ -519,6 +624,18 @@ export default function CustomerDashboard() {
                     >
                       <XCircle size={18} />
                       <span>Cancel Order</span>
+                    </button>
+                  )}
+                  {(selectedOrder.status === 'delivered' || selectedOrder.status === 'cancelled') && (
+                    <button 
+                      onClick={(e) => {
+                        handleDeleteOrder(e, selectedOrder.id);
+                        setSelectedOrder(null);
+                      }}
+                      className="flex items-center gap-2 text-red-600 font-bold hover:text-red-700 transition-all text-sm"
+                    >
+                      <Trash2 size={18} />
+                      <span>Delete Record</span>
                     </button>
                   )}
                 </div>

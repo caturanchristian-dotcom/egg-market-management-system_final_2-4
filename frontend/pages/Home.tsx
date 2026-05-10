@@ -32,6 +32,8 @@ import { Product } from '../types';
  */
 export default function Home() {
   const [featuredProducts, setFeaturedProducts] = useState<Product[]>([]);
+  const [bestSellers, setBestSellers] = useState<Product[]>([]);
+  const [lowestPriceProduct, setLowestPriceProduct] = useState<Product | null>(null);
 
   /**
    * Fetches a subset of the global catalog for social proof and engagement
@@ -42,7 +44,19 @@ export default function Home() {
         if (!res.ok) throw new Error('Failed to fetch products');
         return res.json();
       })
-      .then(data => setFeaturedProducts(Array.isArray(data) ? data.slice(0, 4) : []))
+      .then(data => {
+        if (Array.isArray(data)) {
+          setFeaturedProducts(data.slice(0, 4));
+          
+          // Top 3 Best Sellers
+          const sortedBySales = [...data].sort((a, b) => (b.total_sold || 0) - (a.total_sold || 0));
+          setBestSellers(sortedBySales.slice(0, 3));
+          
+          // Top 1 Low Price
+          const sortedByPrice = [...data].sort((a, b) => Number(a.price_per_tray) - Number(b.price_per_tray));
+          setLowestPriceProduct(sortedByPrice[0] || null);
+        }
+      })
       .catch(err => console.error('Error fetching featured products:', err));
   }, []);
 
@@ -383,6 +397,143 @@ export default function Home() {
                 <div key={i} className="bg-white rounded-[2rem] md:rounded-[3rem] border border-emerald-100 h-[400px] md:h-[500px] animate-pulse" />
               ))
             )}
+          </div>
+        </div>
+      </section>
+      
+      {/* Highlights Section: Best Sellers & Budget Picks */}
+      <section className="py-20 md:py-32 bg-emerald-50/20 relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-full h-full -z-10 opacity-5">
+           <Egg className="absolute top-10 left-10 rotate-12" size={200} />
+           <Egg className="absolute bottom-20 right-20 -rotate-12" size={150} />
+        </div>
+
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-16 md:gap-24">
+            
+            {/* Best Sellers - Top 3 */}
+            <div className="lg:col-span-7 space-y-12">
+              <div className="space-y-6 text-center lg:text-left">
+                <span className="inline-flex items-center gap-2 bg-emerald-100 text-emerald-700 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border border-emerald-200">
+                  <Star size={12} fill="currentColor" /> Most Popular
+                </span>
+                <h3 className="text-4xl md:text-6xl font-display font-bold text-emerald-950 leading-[1.1]">
+                  Top 3 <span className="italic text-emerald-600">Best Sellers.</span>
+                </h3>
+                <p className="text-emerald-800/60 text-lg md:text-xl font-medium max-w-xl mx-auto lg:mx-0">
+                  The products our community loves most, verified by thousands of daily orders across the platform.
+                </p>
+              </div>
+
+              <div className="space-y-6 md:space-y-8">
+                {bestSellers.map((product, idx) => (
+                  <motion.div 
+                    key={product.id}
+                    initial={{ opacity: 0, x: -20 }}
+                    whileInView={{ opacity: 1, x: 0 }}
+                    transition={{ delay: idx * 0.1 }}
+                    className="flex flex-col sm:flex-row items-center gap-6 md:gap-10 p-6 md:p-8 bg-white rounded-3xl md:rounded-[2.5rem] shadow-sm border border-emerald-100/50 hover:shadow-xl hover:border-emerald-200 transition-all group"
+                  >
+                    <div className="relative">
+                      <div className="w-24 h-24 md:w-32 md:h-32 rounded-2xl md:rounded-3xl overflow-hidden shadow-lg border-4 border-emerald-50">
+                        <img 
+                          src={product.image_url || EGG_PLACEHOLDER} 
+                          alt={product.name} 
+                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" 
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                      <div className="absolute -top-3 -left-3 w-8 h-8 md:w-10 md:h-10 bg-emerald-900 text-white rounded-full flex items-center justify-center font-black text-xs md:text-sm shadow-lg border-2 border-white">
+                        {idx + 1}
+                      </div>
+                    </div>
+                    
+                    <div className="flex-1 text-center sm:text-left space-y-2 md:space-y-3">
+                      <div>
+                        <p className="text-[8px] md:text-[10px] text-emerald-500 font-black uppercase tracking-widest">{product.category_name}</p>
+                        <h4 className="text-xl md:text-2xl font-display font-bold text-emerald-950 group-hover:text-emerald-700 transition-colors">{product.name}</h4>
+                      </div>
+                      <div className="flex items-center justify-center sm:justify-start gap-4">
+                        <span className="text-lg md:text-xl font-black text-emerald-900">₱{Number(product.price_per_tray).toFixed(2)}</span>
+                        <span className="w-1 h-1 rounded-full bg-emerald-200" />
+                        <span className="text-[10px] md:text-xs font-bold text-emerald-500/70">{product.total_sold} Trays Sold</span>
+                      </div>
+                    </div>
+
+                    <Link 
+                      to={`/marketplace?id=${product.id}`}
+                      className="bg-emerald-900 text-white p-4 md:p-5 rounded-2xl hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-900/10 active:scale-90"
+                    >
+                      <ShoppingBag size={20} className="md:w-6 md:h-6" />
+                    </Link>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+
+            {/* Lowest Price - Price Leader */}
+            <div className="lg:col-span-5 flex flex-col">
+              <div className="sticky top-24 space-y-10 md:space-y-12">
+                <div className="space-y-6 text-center lg:text-left">
+                  <span className="inline-flex items-center gap-2 bg-orange-100 text-orange-700 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border border-orange-200">
+                    <Heart size={12} fill="currentColor" /> Best Value
+                  </span>
+                  <h3 className="text-4xl md:text-5xl font-display font-bold text-emerald-950 leading-[1.1]">
+                    Top 1 <span className="italic text-orange-600">Low Price.</span>
+                  </h3>
+                  <p className="text-emerald-800/60 text-lg md:text-xl font-medium max-w-sm mx-auto lg:mx-0">
+                    Quality eggs at an unbeatable price point. Our daily budget champion.
+                  </p>
+                </div>
+
+                {lowestPriceProduct ? (
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    whileInView={{ opacity: 1, scale: 1 }}
+                    className="relative bg-white rounded-[3rem] p-10 md:p-14 border border-orange-100 shadow-[0_50px_100px_-30px_rgba(249,115,22,0.1)] group overflow-hidden"
+                  >
+                    {/* Visual accent */}
+                    <div className="absolute top-0 right-0 w-40 h-40 bg-orange-50 rounded-full translate-x-20 -translate-y-20 -z-0" />
+                    
+                    <div className="relative z-10 space-y-8 md:space-y-12 text-center">
+                      <div className="w-full aspect-square md:aspect-[4/3] rounded-[2rem] overflow-hidden shadow-2xl border-2 border-white">
+                        <img 
+                          src={lowestPriceProduct.image_url || EGG_PLACEHOLDER} 
+                          alt={lowestPriceProduct.name} 
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-1000" 
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                      
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                           <p className="text-xs md:text-sm text-orange-600 font-black uppercase tracking-[0.3em]">{lowestPriceProduct.category_name}</p>
+                           <h4 className="text-3xl md:text-4xl font-display font-bold text-emerald-950 group-hover:text-orange-600 transition-colors">{lowestPriceProduct.name}</h4>
+                        </div>
+                        <div className="flex flex-col items-center">
+                           <span className="text-[10px] md:text-xs text-orange-400 font-bold uppercase tracking-widest mb-1">Incredible Offer</span>
+                           <div className="text-5xl md:text-6xl font-display font-black text-emerald-900 flex items-start">
+                             <span className="text-2xl mt-2 mr-1">₱</span>
+                             {Number(lowestPriceProduct.price_per_tray).toFixed(2)}
+                           </div>
+                        </div>
+                      </div>
+
+                      <div className="pt-4">
+                        <Link 
+                          to="/marketplace" 
+                          className="w-full inline-flex items-center justify-center gap-3 bg-orange-600 hover:bg-emerald-900 text-white px-10 py-5 rounded-2xl md:rounded-3xl font-bold transition-all active:scale-95 text-lg shadow-xl shadow-orange-600/20"
+                        >
+                           Grab Best Deal <ShoppingBag size={20} />
+                        </Link>
+                      </div>
+                    </div>
+                  </motion.div>
+                ) : (
+                  <div className="h-[500px] bg-white rounded-[3rem] animate-pulse border border-emerald-100" />
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </section>

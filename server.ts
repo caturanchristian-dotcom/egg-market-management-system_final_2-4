@@ -76,7 +76,8 @@ async function startServer() {
       address TEXT,
       purok VARCHAR(255),
       latitude DOUBLE,
-      longitude DOUBLE
+      longitude DOUBLE,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     -- Product categories (e.g., Chicken Eggs, Duck Eggs)
@@ -147,6 +148,11 @@ async function startServer() {
     if (!columnNames.includes('verification_status')) {
       console.log('Migration: Adding verification_status to users table...');
       await db.execute("ALTER TABLE users ADD COLUMN verification_status ENUM('unverified', 'pending', 'verified', 'rejected') DEFAULT 'unverified'");
+    }
+    
+    if (!columnNames.includes('created_at')) {
+      console.log('Migration: Adding created_at to users table...');
+      await db.execute("ALTER TABLE users ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP");
     }
     
     if (!columnNames.includes('verification_document')) {
@@ -570,7 +576,8 @@ async function startServer() {
              u.phone as farmer_phone, u.address as farmer_address, u.purok as farmer_purok,
              u.latitude as farmer_latitude, u.longitude as farmer_longitude,
              (SELECT AVG(rating) FROM reviews WHERE farmer_id = p.farmer_id) as average_rating,
-             (SELECT COUNT(*) FROM reviews WHERE farmer_id = p.farmer_id) as review_count
+             (SELECT COUNT(*) FROM reviews WHERE farmer_id = p.farmer_id) as review_count,
+             (SELECT COALESCE(SUM(quantity), 0) FROM order_items WHERE product_id = p.id) as total_sold
       FROM products p 
       JOIN categories c ON p.category_id = c.id 
       JOIN users u ON p.farmer_id = u.id
@@ -670,6 +677,45 @@ async function startServer() {
   });
 
   // --- Category Routes ---
+
+  /**
+   * DELETE /api/orders/:id
+   * Permanently removes an order record.
+   * Business rule: Only 'delivered' or 'cancelled' orders can be deleted.
+   */
+  app.delete('/api/orders/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      console.log(`Attempting to delete order: ${id}`);
+      
+      // Verify order exists before deletion
+      const order = await db.queryOne('SELECT status FROM orders WHERE id = ?', [id]);
+      
+      if (!order) {
+        return res.status(404).json({ error: 'Order not found' });
+      }
+
+      // Re-enforce business rule if needed, or just allow it if we want it fully functional
+      // The user requested: "only the cancelled and delivered can delete"
+      const deletableStatuses = ['delivered', 'cancelled'];
+      if (!deletableStatuses.includes(order.status)) {
+        return res.status(400).json({ error: 'Only delivered or cancelled orders can be deleted to maintain record integrity.' });
+      }
+
+      // Delete reviews first (if any) - though ON DELETE CASCADE should handle it, explicit is safer in some envs
+      await db.execute('DELETE FROM reviews WHERE order_id = ?', [id]);
+      // Delete order items (foreign key constraint)
+      await db.execute('DELETE FROM order_items WHERE order_id = ?', [id]);
+      // Delete the order
+      await db.execute('DELETE FROM orders WHERE id = ?', [id]);
+      
+      console.log(`Order ${id} deleted successfully`);
+      res.json({ success: true, message: 'Order deleted successfully' });
+    } catch (err: any) {
+      console.error('Delete order error:', err);
+      res.status(500).json({ error: `Failed to delete order: ${err.message}` });
+    }
+  });
 
   /**
    * GET /api/categories
@@ -895,6 +941,19 @@ async function startServer() {
    * Retrieves full order history for a customer, including meta data for reviews
    */
   app.get('/api/orders/customer/:id', async (req, res) => {
+    const { startDate, endDate } = req.query;
+    let dateFilter = '';
+    const params: any[] = [req.params.id];
+    
+    if (startDate) {
+      dateFilter += ' AND o.created_at >= ?';
+      params.push(startDate);
+    }
+    if (endDate) {
+      dateFilter += ' AND o.created_at <= ?';
+      params.push(endDate);
+    }
+
     const orders = await db.query(`
       SELECT o.*, 
              (SELECT p.farmer_id FROM order_items oi JOIN products p ON oi.product_id = p.id WHERE oi.order_id = o.id LIMIT 1) as farmer_id,
@@ -906,9 +965,9 @@ async function startServer() {
              (SELECT u.longitude FROM order_items oi JOIN products p ON oi.product_id = p.id JOIN users u ON p.farmer_id = u.id WHERE oi.order_id = o.id LIMIT 1) as farmer_longitude,
              (SELECT COUNT(*) FROM reviews r WHERE r.order_id = o.id) as is_reviewed
       FROM orders o 
-      WHERE o.customer_id = ? 
+      WHERE o.customer_id = ? ${dateFilter}
       ORDER BY o.created_at DESC
-    `, [req.params.id]);
+    `, params);
     res.json(orders);
   });
 
@@ -917,15 +976,28 @@ async function startServer() {
    * Retrieves all orders for products belonging to a specific farmer
    */
   app.get('/api/orders/farmer/:id', async (req, res) => {
+    const { startDate, endDate } = req.query;
+    let dateFilter = '';
+    const params: any[] = [req.params.id];
+    
+    if (startDate) {
+      dateFilter += ' AND o.created_at >= ?';
+      params.push(startDate);
+    }
+    if (endDate) {
+      dateFilter += ' AND o.created_at <= ?';
+      params.push(endDate);
+    }
+
     const orders = await db.query(`
       SELECT DISTINCT o.*, u.name as customer_name, u.address as customer_address, u.purok as customer_purok, u.latitude as customer_latitude, u.longitude as customer_longitude
       FROM orders o 
       JOIN order_items oi ON o.id = oi.order_id 
       JOIN products p ON oi.product_id = p.id 
       JOIN users u ON o.customer_id = u.id
-      WHERE p.farmer_id = ?
+      WHERE p.farmer_id = ? ${dateFilter}
       ORDER BY o.created_at DESC
-    `, [req.params.id]);
+    `, params);
     res.json(orders);
   });
 
@@ -1066,20 +1138,38 @@ async function startServer() {
    * Aggregates high-level platform statistics for the admin dashboard
    */
   app.get('/api/admin/stats', isAdmin, async (req, res) => {
-    const totalUsers = await db.queryOne('SELECT COUNT(*) as count FROM users');
-    const totalFarmers = await db.queryOne("SELECT COUNT(*) as count FROM users WHERE role = 'farmer'");
-    const totalCustomers = await db.queryOne("SELECT COUNT(*) as count FROM users WHERE role = 'customer'");
-    const totalOrders = await db.queryOne('SELECT COUNT(*) as count FROM orders');
-    // Calculate total earnings, excluding cancelled orders
-    const totalRevenue = await db.queryOne("SELECT SUM(total_amount) as total FROM orders WHERE status != 'cancelled'");
+    try {
+      const { startDate, endDate } = req.query;
+      let dateFilter = '';
+      const params: any[] = [];
+      
+      if (startDate) {
+        dateFilter += ' AND created_at >= ?';
+        params.push(startDate);
+      }
+      if (endDate) {
+        dateFilter += ' AND created_at <= ?';
+        params.push(endDate);
+      }
+
+      const totalUsers = await db.queryOne('SELECT COUNT(*) as count FROM users');
+      const totalFarmers = await db.queryOne("SELECT COUNT(*) as count FROM users WHERE role = 'farmer'");
+      const totalCustomers = await db.queryOne("SELECT COUNT(*) as count FROM users WHERE role = 'customer'");
+
+      const totalOrders = await db.queryOne('SELECT COUNT(*) as count FROM orders WHERE 1=1' + dateFilter, params);
+      const totalRevenue = await db.queryOne("SELECT SUM(total_amount) as total FROM orders WHERE status != 'cancelled'" + dateFilter, params);
     
     res.json({
-      totalUsers: totalUsers?.count || 0,
-      totalFarmers: totalFarmers?.count || 0,
-      totalCustomers: totalCustomers?.count || 0,
-      totalOrders: totalOrders?.count || 0,
-      totalRevenue: totalRevenue?.total || 0,
-    });
+        totalUsers: totalUsers?.count || 0,
+        totalFarmers: totalFarmers?.count || 0,
+        totalCustomers: totalCustomers?.count || 0,
+        totalOrders: totalOrders?.count || 0,
+        totalRevenue: totalRevenue?.total || 0,
+      });
+    } catch (err: any) {
+      console.error('Admin stats error:', err);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   /**
@@ -1087,8 +1177,13 @@ async function startServer() {
    * Lists all registered users for admin overview
    */
   app.get('/api/admin/users', isAdmin, async (req, res) => {
-    const users = await db.query('SELECT id, name, email, role, status FROM users');
-    res.json(users);
+    try {
+      const users = await db.query('SELECT id, name, email, role, status FROM users');
+      res.json(users);
+    } catch (err: any) {
+      console.error('Admin users fetch error:', err);
+      res.status(500).json({ error: 'Failed to fetch users' });
+    }
   });
 
   /**
@@ -1188,13 +1283,32 @@ async function startServer() {
    * Lists all platform orders for administrative oversight
    */
   app.get('/api/admin/orders', isAdmin, async (req, res) => {
-    const orders = await db.query(`
-      SELECT o.*, u.name as customer_name 
-      FROM orders o 
-      JOIN users u ON o.customer_id = u.id
-      ORDER BY o.created_at DESC
-    `);
-    res.json(orders);
+    try {
+      const { startDate, endDate } = req.query;
+      let dateFilter = '';
+      const params: any[] = [];
+      
+      if (startDate) {
+        dateFilter += ' AND o.created_at >= ?';
+        params.push(startDate);
+      }
+      if (endDate) {
+        dateFilter += ' AND o.created_at <= ?';
+        params.push(endDate);
+      }
+
+      const orders = await db.query(`
+        SELECT o.*, u.name as customer_name 
+        FROM orders o 
+        JOIN users u ON o.customer_id = u.id
+        WHERE 1=1 ${dateFilter}
+        ORDER BY o.created_at DESC
+      `, params);
+      res.json(orders);
+    } catch (err: any) {
+      console.error('Admin orders fetch error:', err);
+      res.status(500).json({ error: 'Failed to fetch orders' });
+    }
   });
 
   // --- Admin Reporting Routes ---
@@ -1204,18 +1318,36 @@ async function startServer() {
    * Returns monthly revenue and order count for the last 12 months
    */
   app.get('/api/admin/reports/sales', isAdmin, async (req, res) => {
-    const reports = await db.query(`
-      SELECT 
-        DATE_FORMAT(created_at, '%Y-%m') as month,
-        COUNT(*) as order_count,
-        SUM(total_amount) as revenue
-      FROM orders
-      WHERE status != 'cancelled'
-      GROUP BY month
-      ORDER BY month DESC
-      LIMIT 12
-    `);
-    res.json(reports);
+    try {
+      const { startDate, endDate } = req.query;
+      let dateFilter = '';
+      const params: any[] = [];
+      
+      if (startDate) {
+        dateFilter += ' AND created_at >= ?';
+        params.push(startDate);
+      }
+      if (endDate) {
+        dateFilter += ' AND created_at <= ?';
+        params.push(endDate);
+      }
+
+      const reports = await db.query(`
+        SELECT 
+          DATE_FORMAT(created_at, '%Y-%m') as month,
+          COUNT(*) as order_count,
+          SUM(total_amount) as revenue
+        FROM orders
+        WHERE status != 'cancelled' ${dateFilter}
+        GROUP BY month
+        ORDER BY month DESC
+        LIMIT 12
+      `, params);
+      res.json(reports);
+    } catch (err: any) {
+      console.error('Admin sales report error:', err);
+      res.status(500).json({ error: 'Failed to fetch sales report' });
+    }
   });
 
   /**
@@ -1440,6 +1572,19 @@ async function startServer() {
    */
   app.get('/api/farmer/:id/sales-stats', async (req, res) => {
     const { id } = req.params;
+    const { startDate, endDate } = req.query;
+    let dateFilter = '';
+    const params: any[] = [id];
+    
+    if (startDate) {
+      dateFilter += ' AND o.created_at >= ?';
+      params.push(startDate);
+    }
+    if (endDate) {
+      dateFilter += ' AND o.created_at <= ?';
+      params.push(endDate);
+    }
+
     const stats = await db.query(`
       SELECT 
         p.name,
@@ -1448,11 +1593,11 @@ async function startServer() {
       FROM order_items oi
       JOIN products p ON oi.product_id = p.id
       JOIN orders o ON oi.order_id = o.id
-      WHERE p.farmer_id = ? AND o.status = 'delivered'
+      WHERE p.farmer_id = ? AND o.status = 'delivered' ${dateFilter}
       GROUP BY p.id
       ORDER BY total_sold DESC
       LIMIT 5
-    `, [id]);
+    `, params);
     res.json(stats);
   });
 
@@ -1462,16 +1607,29 @@ async function startServer() {
    */
   app.get('/api/farmer/:id/reports/daily', async (req, res) => {
     const { id } = req.params;
+    const { startDate, endDate } = req.query;
+    let dateFilter = '';
+    const params: any[] = [id];
+    
+    if (startDate) {
+      dateFilter += ' AND o.created_at >= ?';
+      params.push(startDate);
+    }
+    if (endDate) {
+      dateFilter += ' AND o.created_at <= ?';
+      params.push(endDate);
+    }
+
     const reports = await db.query(`
       SELECT DATE(o.created_at) as date, SUM(oi.quantity * oi.price) as revenue
       FROM orders o
       JOIN order_items oi ON o.id = oi.order_id
       JOIN products p ON oi.product_id = p.id
-      WHERE p.farmer_id = ? AND o.status != 'cancelled'
+      WHERE p.farmer_id = ? AND o.status != 'cancelled' ${dateFilter}
       GROUP BY date
       ORDER BY date ASC
       LIMIT 30
-    `, [id]);
+    `, params);
     res.json(reports);
   });
 
@@ -1524,15 +1682,17 @@ async function startServer() {
     });
   }
 
+  // Run migrations and data seeding before starting the server
+  try {
+    await runMigrations();
+  } catch (err) {
+    console.error('Migration task failed:', err);
+  }
+
   // --- Bootstrap Server ---
   const PORT = process.env.PORT || 3000;
   httpServer.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
-  });
-
-  // Run migrations and data seeding in the background to avoid blocking server readiness
-  runMigrations().catch(err => {
-    console.error('Migration background task failed:', err);
   });
 }
 

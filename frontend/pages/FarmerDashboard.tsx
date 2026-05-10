@@ -62,12 +62,17 @@ export default function FarmerDashboard() {
   const [orders, setOrders] = useState<Order[]>([]); // Orders specifically for this farmer's products
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Date filter state
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   
   // UI Control states
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [productToDelete, setProductToDelete] = useState<number | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<number | null>(null);
+  const [deleteType, setDeleteType] = useState<'product' | 'order' | null>(null);
   const [showGallery, setShowGallery] = useState(false); // Internal asset selector
   
   // Drill-down states
@@ -184,9 +189,14 @@ export default function FarmerDashboard() {
 
   const fetchSalesStats = async () => {
     try {
+      const params = new URLSearchParams();
+      if (startDate) params.append('startDate', startDate);
+      if (endDate) params.append('endDate', endDate);
+      const queryStr = params.toString() ? `?${params.toString()}` : '';
+
       const [statsRes, dailyRes] = await Promise.all([
-        fetch(`/api/farmer/${user?.id}/sales-stats`),
-        fetch(`/api/farmer/${user?.id}/reports/daily`)
+        fetch(`/api/farmer/${user?.id}/sales-stats${queryStr}`),
+        fetch(`/api/farmer/${user?.id}/reports/daily${queryStr}`)
       ]);
       if (statsRes.ok) {
         const data = await statsRes.json();
@@ -203,9 +213,14 @@ export default function FarmerDashboard() {
 
   const fetchData = async () => {
     try {
+      const params = new URLSearchParams();
+      if (startDate) params.append('startDate', startDate);
+      if (endDate) params.append('endDate', endDate);
+      const queryStr = params.toString() ? `?${params.toString()}` : '';
+
       const [prodRes, orderRes, catRes] = await Promise.all([
         fetch(`/api/products/farmer/${user?.id}`),
-        fetch(`/api/orders/farmer/${user?.id}`),
+        fetch(`/api/orders/farmer/${user?.id}${queryStr}`),
         fetch('/api/categories')
       ]);
       
@@ -226,6 +241,55 @@ export default function FarmerDashboard() {
       setLoading(false);
     }
   };
+
+  /**
+   * Triggers the deletion workflow for an order record
+   */
+  const handleDeleteOrder = (e: React.MouseEvent | any, orderId: number) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    setItemToDelete(orderId);
+    setDeleteType('order');
+    setShowDeleteConfirm(true);
+  };
+
+  const handleDeleteProduct = (e: React.MouseEvent | any, id: number) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    setItemToDelete(id);
+    setDeleteType('product');
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!itemToDelete || !deleteType) return;
+    
+    const url = deleteType === 'product' ? `/api/products/${itemToDelete}` : `/api/orders/${itemToDelete}`;
+    
+    try {
+      const response = await fetch(url, { method: 'DELETE' });
+      const data = await response.json();
+      
+      if (response.ok) {
+        showNotify(`${deleteType.charAt(0).toUpperCase()}${deleteType.slice(1)} record deleted successfully`, 'success');
+        fetchData();
+        setShowDeleteConfirm(false);
+        setItemToDelete(null);
+        setDeleteType(null);
+        if (deleteType === 'order') setSelectedOrder(null);
+      } else {
+        showNotify(data.error || `Failed to delete ${deleteType}`, 'error');
+      }
+    } catch (err) {
+      console.error(`Error deleting ${deleteType}:`, err);
+      showNotify('Unexpected error occurred', 'error');
+    }
+  };
+
+  useEffect(() => {
+    if (user) {
+      fetchData();
+      fetchSalesStats();
+    }
+  }, [startDate, endDate]);
 
   /**
    * Product Management Logic
@@ -268,28 +332,6 @@ export default function FarmerDashboard() {
     } catch (err) {
       console.error('Error saving product:', err);
       showNotify('An error occurred while saving the product', 'error');
-    }
-  };
-
-  const handleDeleteProduct = async (id: number) => {
-    setProductToDelete(id);
-    setShowDeleteConfirm(true);
-  };
-
-  const confirmDeleteProduct = async () => {
-    if (!productToDelete) return;
-    try {
-      const response = await fetch(`/api/products/${productToDelete}`, { method: 'DELETE' });
-      const data = await response.json();
-      if (response.ok) {
-        fetchData();
-        showNotify('Product deleted successfully!', 'success');
-      } else {
-        showNotify(data.error || 'Failed to delete product', 'error');
-      }
-    } catch (err) {
-      console.error('Error deleting product:', err);
-      showNotify('An error occurred while deleting the product', 'error');
     }
   };
 
@@ -686,7 +728,7 @@ export default function FarmerDashboard() {
                   <Edit2 size={14} />
                 </button>
                 <button 
-                  onClick={() => handleDeleteProduct(product.id)}
+                  onClick={(e) => handleDeleteProduct(e, product.id)}
                   className="p-1.5 md:p-2 bg-white/90 backdrop-blur-sm rounded-lg md:rounded-xl text-red-600 hover:bg-red-600 hover:text-white transition-all shadow-sm"
                 >
                   <Trash2 size={14} />
@@ -819,6 +861,15 @@ export default function FarmerDashboard() {
                         <XCircle size={18} />
                       </button>
                     )}
+                    {(order.status === 'delivered' || order.status === 'cancelled') && (
+                      <button 
+                        onClick={(e) => handleDeleteOrder(e, order.id)}
+                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                        title="Delete Order Record"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -868,7 +919,7 @@ export default function FarmerDashboard() {
               </div>
               <div className="text-right">
                 <p className="text-xs text-emerald-500 mb-1">Total Amount</p>
-                <p className="text-xl font-display font-bold text-emerald-900">₱{order.total_amount.toFixed(2)}</p>
+                <p className="text-xl font-display font-bold text-emerald-900">₱{Number(order.total_amount).toFixed(2)}</p>
               </div>
             </div>
 
@@ -912,6 +963,15 @@ export default function FarmerDashboard() {
                   className="p-3 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-all"
                 >
                   <XCircle size={18} />
+                </button>
+              )}
+              {(order.status === 'delivered' || order.status === 'cancelled') && (
+                <button 
+                  onClick={(e) => handleDeleteOrder(e, order.id)}
+                  className="p-3 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-all"
+                  title="Delete Order Record"
+                >
+                  <Trash2 size={18} />
                 </button>
               )}
             </div>
@@ -967,7 +1027,7 @@ export default function FarmerDashboard() {
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex flex-col gap-1">
-                    <span className="text-xs text-emerald-600 font-bold">₱{product.price_per_tray.toFixed(2)}/tray</span>
+                    <span className="text-xs text-emerald-600 font-bold">₱{Number(product.price_per_tray).toFixed(2)}/tray</span>
                   </div>
                 </td>
                 <td className="px-6 py-4 text-sm text-emerald-500">{product.category_name}</td>
@@ -1040,7 +1100,7 @@ export default function FarmerDashboard() {
               <div>
                 <p className="text-[10px] text-emerald-500 uppercase font-bold mb-1">Pricing</p>
                 <div className="space-y-1">
-                  <p className="text-sm font-bold text-emerald-900">₱{product.price_per_tray.toFixed(2)}/t</p>
+                  <p className="text-sm font-bold text-emerald-900">₱{Number(product.price_per_tray).toFixed(2)}/t</p>
                 </div>
               </div>
             </div>
@@ -1079,7 +1139,7 @@ export default function FarmerDashboard() {
           <h2 className="text-2xl font-bold text-emerald-900">Sales Reports & Analytics</h2>
           <div className="flex gap-2">
             <div className="bg-emerald-100 text-emerald-700 px-4 py-2 rounded-xl text-sm font-bold">
-              Lifetime Revenue: ₱{totalRevenue.toFixed(2)}
+              Lifetime Revenue: ₱{Number(totalRevenue).toFixed(2)}
             </div>
           </div>
         </div>
@@ -1221,7 +1281,7 @@ export default function FarmerDashboard() {
                     <td className="px-6 py-4 text-xs font-bold text-emerald-900">#{order.id}</td>
                     <td className="px-6 py-4 text-xs text-emerald-800">{order.customer_name}</td>
                     <td className="px-6 py-4 text-xs text-emerald-500">{new Date(order.created_at).toLocaleDateString()}</td>
-                    <td className="px-6 py-4 text-xs font-bold text-emerald-900">₱{order.total_amount.toFixed(2)}</td>
+                    <td className="px-6 py-4 text-xs font-bold text-emerald-900">₱{Number(order.total_amount).toFixed(2)}</td>
                     <td className="px-6 py-4">
                       <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
                         order.status === 'delivered' ? 'bg-emerald-100 text-emerald-700' :
@@ -1288,6 +1348,45 @@ export default function FarmerDashboard() {
 
   return (
     <DashboardLayout activeTab={activeTab} setActiveTab={setActiveTab}>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+        <h1 className="text-3xl font-bold text-emerald-900 capitalize">
+          {activeTab.replace('-', ' ')}
+        </h1>
+        
+        {['dashboard', 'orders', 'sales-reports'].includes(activeTab) && (
+          <div className="flex flex-wrap items-center gap-3 bg-white p-2 rounded-2xl border border-emerald-100 shadow-sm w-full md:w-auto">
+            <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 rounded-xl">
+              <Calendar size={16} className="text-emerald-600" />
+              <span className="text-xs font-bold text-emerald-700 uppercase">Filter</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <input 
+                type="date" 
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="bg-transparent text-xs font-bold text-emerald-900 outline-none p-1"
+              />
+              <span className="text-emerald-300 text-xs">to</span>
+              <input 
+                type="date" 
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="bg-transparent text-xs font-bold text-emerald-900 outline-none p-1"
+              />
+              {(startDate || endDate) && (
+                <button 
+                  onClick={() => { setStartDate(''); setEndDate(''); }}
+                  className="p-1 hover:bg-red-50 text-red-400 rounded-lg transition-all"
+                  title="Clear Filter"
+                >
+                  <XCircle size={16} />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
       {activeTab === 'dashboard' && renderDashboard()}
       {activeTab === 'manage-products' && renderProducts()}
       {activeTab === 'orders' && renderOrders()}
@@ -1463,18 +1562,18 @@ export default function FarmerDashboard() {
                               {item.egg_type && (
                                 <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Type: {item.egg_type}</p>
                               )}
-                              <p className="text-sm text-emerald-500">{item.quantity} tray(s) x ₱{item.price_per_tray.toFixed(2)}</p>
+                              <p className="text-sm text-emerald-500">{item.quantity} tray(s) x ₱{Number(item.price_per_tray).toFixed(2)}</p>
                             </div>
                           </div>
                         </div>
-                        <p className="font-bold text-emerald-900">₱{(item.quantity * item.price_per_tray).toFixed(2)}</p>
+                        <p className="font-bold text-emerald-900">₱{(Number(item.quantity) * Number(item.price_per_tray)).toFixed(2)}</p>
                       </div>
                     ))}
                   </div>
 
                   <div className="pt-6 border-t border-emerald-50 flex justify-between items-center">
                     <span className="text-emerald-600 font-bold">Total Amount</span>
-                    <span className="text-3xl font-bold text-emerald-900">₱{selectedOrder.total_amount.toFixed(2)}</span>
+                    <span className="text-3xl font-bold text-emerald-900">₱{Number(selectedOrder.total_amount).toFixed(2)}</span>
                   </div>
                 </div>
               </div>
@@ -1513,6 +1612,17 @@ export default function FarmerDashboard() {
                     <CheckCircle2 size={20} /> Mark Delivered
                   </button>
                 )}
+                {(selectedOrder.status === 'delivered' || selectedOrder.status === 'cancelled') && (
+                  <button 
+                    onClick={(e) => {
+                      handleDeleteOrder(e, selectedOrder.id);
+                      setSelectedOrder(null);
+                    }}
+                    className="flex-1 bg-red-100 text-red-600 py-3 rounded-xl font-bold hover:bg-red-200 transition-all flex items-center justify-center gap-2"
+                  >
+                    <Trash2 size={20} /> Delete Record
+                  </button>
+                )}
                 <button 
                   onClick={() => setSelectedOrder(null)}
                   className="px-6 py-3 bg-white text-emerald-600 border border-emerald-200 rounded-xl font-bold hover:bg-emerald-50 transition-all"
@@ -1528,11 +1638,15 @@ export default function FarmerDashboard() {
       {/* Confirmation Modals */}
       <ConfirmationModal
         isOpen={showDeleteConfirm}
-        onClose={() => setShowDeleteConfirm(false)}
-        onConfirm={confirmDeleteProduct}
-        title="Delete Product"
-        message="Are you sure you want to delete this product? This action cannot be undone."
-        confirmText="Delete Product"
+        onClose={() => {
+          setShowDeleteConfirm(false);
+          setItemToDelete(null);
+          setDeleteType(null);
+        }}
+        onConfirm={confirmDelete}
+        title={`Delete ${deleteType === 'product' ? 'Product' : 'Order Record'}`}
+        message={`Are you sure you want to delete this ${deleteType === 'product' ? 'product' : 'order record'}? This action cannot be undone.`}
+        confirmText="Delete"
       />
 
       {/* Image Gallery Modal */}

@@ -64,6 +64,11 @@ export default function AdminDashboard() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [pendingVerifications, setPendingVerifications] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Date filter state
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  
   const [showAddModal, setShowAddModal] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
@@ -78,7 +83,7 @@ export default function AdminDashboard() {
   });
   const [error, setError] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [deleteType, setDeleteType] = useState<'user' | 'category' | 'product' | null>(null);
+  const [deleteType, setDeleteType] = useState<'user' | 'category' | 'product' | 'order' | null>(null);
   const [itemToDelete, setItemToDelete] = useState<number | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [orderItems, setOrderItems] = useState<any[]>([]);
@@ -96,7 +101,7 @@ export default function AdminDashboard() {
    */
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [startDate, endDate]);
 
   const showNotify = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     showToast(message, type);
@@ -154,28 +159,39 @@ export default function AdminDashboard() {
    */
   const fetchData = async () => {
     try {
+      const params = new URLSearchParams();
+      if (startDate) params.append('startDate', startDate);
+      if (endDate) params.append('endDate', endDate);
+      const queryStr = params.toString() ? `?${params.toString()}` : '';
+
       const [statsRes, usersRes, productsRes, ordersRes, reportsRes, settingsRes, categoriesRes, catReportsRes, farmerReportsRes] = await Promise.all([
-        fetch('/api/admin/stats'),
+        fetch(`/api/admin/stats${queryStr}`),
         fetch('/api/admin/users'),
         fetch('/api/products'),
-        fetch('/api/admin/orders'),
-        fetch('/api/admin/reports/sales'),
+        fetch(`/api/admin/orders${queryStr}`),
+        fetch(`/api/admin/reports/sales${queryStr}`),
         fetch('/api/settings'),
         fetch('/api/categories'),
         fetch('/api/admin/reports/categories'),
         fetch('/api/admin/reports/farmers')
       ]);
-      setStats(await statsRes.json());
-      setUsers(await usersRes.json());
-      setProducts(await productsRes.json());
-      setOrders(await ordersRes.json());
-      setReports(await reportsRes.json());
-      const settingsData = await settingsRes.json();
-      setSettings(settingsData);
-      setSettingsForm(settingsData);
-      setCategories(await categoriesRes.json());
-      setCategoryReports(await catReportsRes.json());
-      setFarmerReports(await farmerReportsRes.json());
+
+      if (statsRes.ok) setStats(await statsRes.json());
+      if (usersRes.ok) setUsers(await usersRes.json());
+      if (productsRes.ok) setProducts(await productsRes.json());
+      if (ordersRes.ok) setOrders(await ordersRes.json());
+      if (reportsRes.ok) setReports(await reportsRes.json());
+      
+      if (settingsRes.ok) {
+        const settingsData = await settingsRes.json();
+        setSettings(settingsData);
+        setSettingsForm(settingsData);
+      }
+      
+      if (categoriesRes.ok) setCategories(await categoriesRes.json());
+      if (catReportsRes.ok) setCategoryReports(await catReportsRes.json());
+      if (farmerReportsRes.ok) setFarmerReports(await farmerReportsRes.json());
+      
       fetchPendingVerifications();
     } catch (err) {
       console.error('Error fetching admin data:', err);
@@ -229,7 +245,8 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleDeleteUser = async (id: number) => {
+  const handleDeleteUser = async (e: React.MouseEvent | any, id: number) => {
+    if (e && e.stopPropagation) e.stopPropagation();
     setItemToDelete(id);
     setDeleteType('user');
     setShowDeleteConfirm(true);
@@ -242,13 +259,18 @@ export default function AdminDashboard() {
     if (deleteType === 'user') url = `/api/admin/users/${itemToDelete}`;
     else if (deleteType === 'category') url = `/api/admin/categories/${itemToDelete}`;
     else if (deleteType === 'product') url = `/api/products/${itemToDelete}`;
+    else if (deleteType === 'order') url = `/api/orders/${itemToDelete}`;
 
     try {
       const response = await fetch(url, { method: 'DELETE' });
       const data = await response.json();
       if (response.ok) {
         fetchData();
-        showNotify(`${deleteType?.charAt(0).toUpperCase()}${deleteType?.slice(1)} deleted successfully!`, 'success');
+        showNotify(`${deleteType.charAt(0).toUpperCase()}${deleteType.slice(1)} deleted successfully!`, 'success');
+        setShowDeleteConfirm(false);
+        setItemToDelete(null);
+        setDeleteType(null);
+        if (deleteType === 'order') setSelectedOrder(null);
       } else {
         showNotify(data.error || `Failed to delete ${deleteType}`, 'error');
       }
@@ -256,6 +278,26 @@ export default function AdminDashboard() {
       console.error(`Error deleting ${deleteType}:`, err);
       showNotify(`An error occurred while deleting the ${deleteType}`, 'error');
     }
+  };
+
+  /**
+   * Triggers the deletion workflow for a product
+   */
+  const handleDeleteProduct = (e: React.MouseEvent | any, id: number) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    setItemToDelete(id);
+    setDeleteType('product');
+    setShowDeleteConfirm(true);
+  };
+
+  /**
+   * Triggers the deletion workflow for an order
+   */
+  const handleDeleteOrder = (e: React.MouseEvent | any, orderId: number) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    setItemToDelete(orderId);
+    setDeleteType('order');
+    setShowDeleteConfirm(true);
   };
 
   const handleCategorySubmit = async (e: React.FormEvent) => {
@@ -284,7 +326,8 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleDeleteCategory = async (id: number) => {
+  const handleDeleteCategory = async (e: React.MouseEvent | any, id: number) => {
+    if (e && e.stopPropagation) e.stopPropagation();
     setItemToDelete(id);
     setDeleteType('category');
     setShowDeleteConfirm(true);
@@ -332,7 +375,7 @@ export default function AdminDashboard() {
                 <Edit2 size={18} />
               </button>
               <button 
-                onClick={() => handleDeleteCategory(category.id)}
+                onClick={(e) => handleDeleteCategory(e, category.id)}
                 className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-all"
               >
                 <Trash2 size={18} />
@@ -544,7 +587,7 @@ export default function AdminDashboard() {
                       </button>
                     )}
                     <button 
-                      onClick={() => handleDeleteUser(user.id)}
+                      onClick={(e) => handleDeleteUser(e, user.id)}
                       className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-all" 
                       title="Delete"
                     >
@@ -615,7 +658,7 @@ export default function AdminDashboard() {
                     <UserX size={18} />
                   </button>
                 )}
-                <button onClick={() => handleDeleteUser(user.id)} className="p-2 text-red-600 bg-red-50 rounded-xl">
+                <button onClick={(e) => handleDeleteUser(e, user.id)} className="p-2 text-red-600 bg-red-50 rounded-xl">
                   <Trash2 size={18} />
                 </button>
               </div>
@@ -676,11 +719,7 @@ export default function AdminDashboard() {
                 </td>
                 <td className="px-6 py-4">
                   <button 
-                    onClick={() => {
-                      setItemToDelete(product.id);
-                      setDeleteType('product');
-                      setShowDeleteConfirm(true);
-                    }}
+                    onClick={(e) => handleDeleteProduct(e, product.id)}
                     className="text-red-600 hover:text-red-700 p-2 hover:bg-red-50 rounded-lg transition-all"
                   >
                     <Trash2 size={18} />
@@ -721,11 +760,7 @@ export default function AdminDashboard() {
             <div className="flex justify-between items-center">
               <span className="text-xs text-emerald-600">Type: {product.egg_type || '-'}</span>
               <button 
-                onClick={() => {
-                  setItemToDelete(product.id);
-                  setDeleteType('product');
-                  setShowDeleteConfirm(true);
-                }}
+                onClick={(e) => handleDeleteProduct(e, product.id)}
                 className="p-2 text-red-600 bg-red-50 rounded-xl"
               >
                 <Trash2 size={18} />
@@ -773,16 +808,27 @@ export default function AdminDashboard() {
                   </span>
                 </td>
                 <td className="px-6 py-4">
-                  <button 
-                    onClick={() => {
-                      setSelectedOrder(order);
-                      fetchOrderItems(order.id);
-                    }}
-                    className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
-                    title="View Details"
-                  >
-                    <ClipboardList size={18} />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => {
+                        setSelectedOrder(order);
+                        fetchOrderItems(order.id);
+                      }}
+                      className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                      title="View Details"
+                    >
+                      <ClipboardList size={18} />
+                    </button>
+                    {(order.status === 'delivered' || order.status === 'cancelled') && (
+                      <button 
+                        onClick={(e) => handleDeleteOrder(e, order.id)}
+                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                        title="Delete Order"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -819,15 +865,26 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            <button 
-              onClick={() => {
-                setSelectedOrder(order);
-                fetchOrderItems(order.id);
-              }}
-              className="w-full bg-emerald-50 text-emerald-700 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2"
-            >
-              <ClipboardList size={18} /> View Order Details
-            </button>
+            <div className="flex gap-2 pt-2">
+              <button 
+                onClick={() => {
+                  setSelectedOrder(order);
+                  fetchOrderItems(order.id);
+                }}
+                className="flex-1 bg-emerald-50 text-emerald-700 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2"
+              >
+                <ClipboardList size={18} /> View details
+              </button>
+              {(order.status === 'delivered' || order.status === 'cancelled') && (
+                <button 
+                  onClick={(e) => handleDeleteOrder(e, order.id)}
+                  className="px-4 bg-red-50 text-red-600 rounded-xl flex items-center justify-center"
+                  title="Delete Order"
+                >
+                  <Trash2 size={18} />
+                </button>
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -1035,7 +1092,7 @@ export default function AdminDashboard() {
                       </button>
                     )}
                     <button 
-                      onClick={() => handleDeleteUser(farmer.id)}
+                      onClick={(e) => handleDeleteUser(e, farmer.id)}
                       className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-all" 
                       title="Delete Farmer"
                     >
@@ -1261,6 +1318,45 @@ export default function AdminDashboard() {
 
   return (
     <DashboardLayout activeTab={activeTab} setActiveTab={setActiveTab}>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+        <h1 className="text-3xl font-bold text-emerald-900 capitalize">
+          {activeTab.replace('-', ' ')}
+        </h1>
+
+        {['dashboard', 'orders', 'reports'].includes(activeTab) && (
+          <div className="flex flex-wrap items-center gap-3 bg-white p-2 rounded-2xl border border-emerald-100 shadow-sm w-full md:w-auto">
+            <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 rounded-xl">
+              <ClipboardList size={16} className="text-emerald-600" />
+              <span className="text-xs font-bold text-emerald-700 uppercase">Filter</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <input 
+                type="date" 
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="bg-transparent text-xs font-bold text-emerald-900 outline-none p-1"
+              />
+              <span className="text-emerald-300 text-xs">to</span>
+              <input 
+                type="date" 
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="bg-transparent text-xs font-bold text-emerald-900 outline-none p-1"
+              />
+              {(startDate || endDate) && (
+                <button 
+                  onClick={() => { setStartDate(''); setEndDate(''); }}
+                  className="p-1 hover:bg-red-50 text-red-400 rounded-lg transition-all"
+                  title="Clear Filter"
+                >
+                  <XCircle size={16} />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
       {activeTab === 'dashboard' && renderOverview()}
       {activeTab === 'users' && renderUsers()}
       {activeTab === 'farmers' && renderFarmers()}
@@ -1327,23 +1423,31 @@ export default function AdminDashboard() {
                             {item.egg_type && (
                               <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Type: {item.egg_type}</p>
                             )}
-                            <p className="text-sm text-emerald-500">{item.quantity} {item.unit || 'unit'}(s) x ₱{item.price.toFixed(2)}</p>
+                            <p className="text-sm text-emerald-500">{item.quantity} {item.unit || 'unit'}(s) x ₱{Number(item.price).toFixed(2)}</p>
                           </div>
                         </div>
                       </div>
-                      <p className="font-bold text-emerald-900">₱{(item.quantity * item.price).toFixed(2)}</p>
+                      <p className="font-bold text-emerald-900">₱{(Number(item.quantity) * Number(item.price)).toFixed(2)}</p>
                     </div>
                   ))}
                 </div>
 
                 <div className="pt-6 border-t border-emerald-50 flex justify-between items-center">
                   <span className="text-emerald-600 font-bold">Total Amount</span>
-                  <span className="text-3xl font-bold text-emerald-900">₱{selectedOrder.total_amount.toFixed(2)}</span>
+                  <span className="text-3xl font-bold text-emerald-900">₱{Number(selectedOrder.total_amount).toFixed(2)}</span>
                 </div>
               </div>
             </div>
 
-            <div className="p-6 bg-emerald-50 flex justify-end shrink-0">
+            <div className="p-6 bg-emerald-50 flex gap-3 justify-end shrink-0">
+              {(selectedOrder.status === 'delivered' || selectedOrder.status === 'cancelled') && (
+                <button 
+                  onClick={(e) => handleDeleteOrder(e, selectedOrder.id)}
+                  className="px-6 py-3 bg-red-50 text-red-600 border border-red-100 rounded-xl font-bold hover:bg-red-100 transition-all flex items-center gap-2"
+                >
+                  <Trash2 size={18} /> Delete Order
+                </button>
+              )}
               <button 
                 onClick={() => setSelectedOrder(null)}
                 className="px-6 py-3 bg-white text-emerald-600 border border-emerald-200 rounded-xl font-bold hover:bg-emerald-50 transition-all"
@@ -1364,7 +1468,7 @@ export default function AdminDashboard() {
           setDeleteType(null);
         }}
         onConfirm={confirmDelete}
-        title={`Delete ${deleteType === 'user' ? 'User' : deleteType === 'category' ? 'Category' : 'Product'}`}
+        title={`Delete ${deleteType === 'user' ? 'User' : deleteType === 'category' ? 'Category' : deleteType === 'order' ? 'Order' : 'Product'}`}
         message={`Are you sure you want to delete this ${deleteType}? This action cannot be undone.`}
         confirmText="Delete"
       />
@@ -1445,7 +1549,7 @@ export default function AdminDashboard() {
                                   <p className="text-xs text-emerald-500">{sale.total_sold} units sold</p>
                                 </div>
                               </div>
-                              <p className="font-bold text-emerald-700">₱{sale.total_revenue.toFixed(2)}</p>
+                              <p className="font-bold text-emerald-700">₱{Number(sale.total_revenue).toFixed(2)}</p>
                             </div>
                           ))
                         ) : (
