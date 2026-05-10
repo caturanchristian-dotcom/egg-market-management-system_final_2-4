@@ -34,6 +34,8 @@ import MessagingSystem from '../components/MessagingSystem';
 import ConfirmationModal from '../components/ConfirmationModal';
 import { Image as ImageIcon } from 'lucide-react';
 import { EGG_PLACEHOLDER } from '../constants';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const EGG_GALLERY = [
   { url: 'https://images.unsplash.com/photo-1582722872445-44dc5f7e3c8f?auto=format&fit=crop&q=80&w=800', label: 'White Eggs' },
@@ -282,6 +284,70 @@ export default function FarmerDashboard() {
       console.error(`Error deleting ${deleteType}:`, err);
       showNotify('Unexpected error occurred', 'error');
     }
+  };
+
+  const handleDownloadReport = () => {
+    const doc = new jsPDF();
+    
+    // Add title
+    doc.setFontSize(22);
+    doc.setTextColor(16, 185, 129); // emerald-500
+    doc.text('Egg Market Sales Report', 14, 22);
+    
+    // Report Info
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 32);
+    doc.text(`Farmer account: ${user?.name || 'User'} (${user?.email || 'N/A'})`, 14, 38);
+    
+    // Summary
+    const totalTransactions = orders.length;
+    const totalRevenue = orders.reduce((sum, o) => sum + Number(o.total_amount), 0);
+    const deliveredCount = orders.filter(o => o.status === 'delivered').length;
+    
+    doc.setFontSize(12);
+    doc.setTextColor(30);
+    doc.text('Business Summary', 14, 52);
+    doc.setFontSize(10);
+    doc.text(`Total Transactions: ${totalTransactions}`, 14, 60);
+    doc.text(`Completed Sales: ${deliveredCount}`, 14, 66);
+    doc.text(`Gross Revenue: PHP ${totalRevenue.toLocaleString()}`, 14, 72);
+
+    // Table
+    const tableColumn = ["Order ID", "Customer Name", "Order Date", "Amount", "Status"];
+    const tableRows = orders.map(order => [
+      `#${order.id}`,
+      order.customer_name || 'N/A',
+      new Date(order.created_at).toLocaleDateString(),
+      `PHP ${Number(order.total_amount).toLocaleString()}`,
+      order.status.toUpperCase()
+    ]);
+
+    autoTable(doc, {
+      head: [tableColumn],
+      body: tableRows,
+      startY: 82,
+      theme: 'striped',
+      headStyles: { fillColor: [16, 185, 129], textColor: [255, 255, 255], fontStyle: 'bold' },
+      styles: { fontSize: 9, cellPadding: 3 },
+      alternateRowStyles: { fillColor: [249, 255, 251] }
+    });
+
+    // Footer
+    const pageCount = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(150);
+      doc.text(
+        `Egg Market Platform - Official Sales Document | Page ${i} of ${pageCount}`,
+        doc.internal.pageSize.getWidth() / 2,
+        doc.internal.pageSize.getHeight() - 10,
+        { align: 'center' }
+      );
+    }
+
+    doc.save(`EggMarket_Report_${new Date().getTime()}.pdf`);
   };
 
   useEffect(() => {
@@ -1262,7 +1328,12 @@ export default function FarmerDashboard() {
         <div className="bg-white rounded-3xl border border-emerald-100 shadow-sm overflow-hidden">
           <div className="p-6 border-b border-emerald-50 flex justify-between items-center">
             <h3 className="font-bold text-emerald-900">Recent Transactions</h3>
-            <button className="text-xs font-bold text-emerald-600 hover:underline">Download Report</button>
+            <button 
+              onClick={handleDownloadReport}
+              className="text-xs font-bold text-emerald-600 hover:bg-emerald-50 px-3 py-1.5 rounded-lg transition-all"
+            >
+              Download Report
+            </button>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left">

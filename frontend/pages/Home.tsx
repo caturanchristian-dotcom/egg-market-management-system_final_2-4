@@ -57,7 +57,13 @@ export default function Home() {
           setLowestPriceProduct(sortedByPrice[0] || null);
         }
       })
-      .catch(err => console.error('Error fetching featured products:', err));
+      .catch(err => {
+        console.error('Error fetching featured products:', err);
+        if (err instanceof Error) {
+          console.error('Fetch error details:', err.message);
+          console.error('Fetch error stack:', err.stack);
+        }
+      });
   }, []);
 
   return (

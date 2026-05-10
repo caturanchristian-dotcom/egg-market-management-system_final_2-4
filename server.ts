@@ -581,19 +581,26 @@ async function startServer() {
    * Retrieves all active products with category and farmer information, plus ratings
    */
   app.get('/api/products', async (req, res) => {
-    const products = await db.query(`
-      SELECT p.*, c.name as category_name, u.name as farmer_name,
-             u.phone as farmer_phone, u.address as farmer_address, u.purok as farmer_purok,
-             u.latitude as farmer_latitude, u.longitude as farmer_longitude,
-             (SELECT AVG(rating) FROM reviews WHERE farmer_id = p.farmer_id) as average_rating,
-             (SELECT COUNT(*) FROM reviews WHERE farmer_id = p.farmer_id) as review_count,
-             (SELECT COALESCE(SUM(quantity), 0) FROM order_items WHERE product_id = p.id) as total_sold
-      FROM products p 
-      JOIN categories c ON p.category_id = c.id 
-      JOIN users u ON p.farmer_id = u.id
-      WHERE p.is_deleted = 0
-    `);
-    res.json(products);
+    console.log('GET /api/products request received');
+    try {
+      const products = await db.query(`
+        SELECT p.*, c.name as category_name, u.name as farmer_name,
+               u.phone as farmer_phone, u.address as farmer_address, u.purok as farmer_purok,
+               u.latitude as farmer_latitude, u.longitude as farmer_longitude,
+               (SELECT AVG(rating) FROM reviews WHERE farmer_id = p.farmer_id) as average_rating,
+               (SELECT COUNT(*) FROM reviews WHERE farmer_id = p.farmer_id) as review_count,
+               (SELECT COALESCE(SUM(quantity), 0) FROM order_items WHERE product_id = p.id) as total_sold
+        FROM products p 
+        JOIN categories c ON p.category_id = c.id 
+        JOIN users u ON p.farmer_id = u.id
+        WHERE p.is_deleted = 0
+      `);
+      console.log(`Fetched ${products.length} products`);
+      res.json(products);
+    } catch (err: any) {
+      console.error('Error fetching products from DB:', err);
+      res.status(500).json({ error: 'Failed to fetch products from database' });
+    }
   });
 
   /**
@@ -1191,30 +1198,30 @@ async function startServer() {
       // Aggregating 4 major activity types into a unified feed
       const activity = await db.query(`
         (SELECT 
-          CONVERT('user_signup' USING utf8mb4) as type, 
-          CONVERT(name USING utf8mb4) as message, 
-          CONVERT(role USING utf8mb4) as meta,
+          CAST('user_signup' AS CHAR) as type, 
+          CAST(name AS CHAR) as message, 
+          CAST(role AS CHAR) as meta,
           created_at 
          FROM users)
         UNION ALL
         (SELECT 
-          CONVERT('order_placed' USING utf8mb4) as type, 
-          CONVERT(CONCAT('Order #', id) USING utf8mb4) as message, 
-          CONVERT(total_amount USING utf8mb4) as meta,
+          CAST('order_placed' AS CHAR) as type, 
+          CAST(CONCAT('Order #', id) AS CHAR) as message, 
+          CAST(total_amount AS CHAR) as meta,
           created_at 
          FROM orders)
         UNION ALL
         (SELECT 
-          CONVERT('product_added' USING utf8mb4) as type, 
-          CONVERT(name USING utf8mb4) as message, 
-          CONVERT(price_per_tray USING utf8mb4) as meta,
+          CAST('product_added' AS CHAR) as type, 
+          CAST(name AS CHAR) as message, 
+          CAST(price_per_tray AS CHAR) as meta,
           created_at 
          FROM products)
         UNION ALL
         (SELECT 
-          CONVERT('farmer_verified' USING utf8mb4) as type, 
-          CONVERT(name USING utf8mb4) as message, 
-          CONVERT(verification_status USING utf8mb4) as meta,
+          CAST('farmer_verified' AS CHAR) as type, 
+          CAST(name AS CHAR) as message, 
+          CAST(verification_status AS CHAR) as meta,
           created_at 
          FROM users 
          WHERE role = 'farmer' AND verification_status = 'verified')
