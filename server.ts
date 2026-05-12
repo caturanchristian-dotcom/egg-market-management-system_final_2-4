@@ -32,12 +32,23 @@ const oauth2Client = new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET);
  * Helper to get base URL for redirects
  */
   const getBaseUrl = (req: express.Request) => {
+    // 1. Explicitly configured URL takes priority
     if (APP_URL) {
       return APP_URL.endsWith('/') ? APP_URL.slice(0, -1) : APP_URL;
     }
-    // With trust proxy enabled, req.protocol and req.get('host') are populated from X-Forwarded-* headers
-    const protocol = req.protocol;
-    const host = req.get('host');
+    
+    // 2. Render.com external URL detection
+    if (process.env.RENDER_EXTERNAL_URL) {
+      const renderUrl = process.env.RENDER_EXTERNAL_URL;
+      return renderUrl.endsWith('/') ? renderUrl.slice(0, -1) : renderUrl;
+    }
+
+    // 3. Auto-detect from request headers
+    const host = req.get('host') || '';
+    // Use https for all non-localhost environments to avoid redirect_uri_mismatch on secure proxies
+    const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
+    const protocol = isLocal ? req.protocol : (req.headers['x-forwarded-proto'] || 'https');
+    
     return `${protocol}://${host}`;
   };
 
@@ -488,7 +499,8 @@ async function startServer() {
 
     const baseUrl = getBaseUrl(req);
     const redirectUri = `${baseUrl}/api/auth/google/callback`;
-    console.log(`Generating Google Auth URL with redirect_uri: ${redirectUri}`);
+    console.log(`[OAuth] Generating Google Auth URL. Base: ${baseUrl}, Redirect: ${redirectUri}`);
+    
     const url = oauth2Client.generateAuthUrl({
       access_type: 'offline',
       prompt: 'select_account',
@@ -511,7 +523,8 @@ async function startServer() {
     try {
       const baseUrl = getBaseUrl(req);
       const redirectUri = `${baseUrl}/api/auth/google/callback`;
-      console.log(`Handling Google Auth Callback with redirect_uri: ${redirectUri}`);
+      console.log(`[OAuth] Handling callback. Base: ${baseUrl}, Redirect: ${redirectUri}`);
+      
       // Exchange authorization code for tokens
       const { tokens } = await oauth2Client.getToken({
         code: code as string,

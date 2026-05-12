@@ -38,16 +38,16 @@ export default function AuthPage() {
    */
   useEffect(() => {
     const handleOAuthMessage = (event: MessageEvent) => {
-      const origin = event.origin;
+      const origin = event.origin.toLowerCase();
       // Allow current origin, local development, AI Studio previews, and common deployment platforms
-      const currentOrigin = window.location.origin;
+      const currentOrigin = window.location.origin.toLowerCase();
       const isAllowedOrigin = 
         origin === currentOrigin ||
         origin.includes('localhost') || 
-        origin.endsWith('.run.app') || 
-        origin.endsWith('.aistudio-preview.app') ||
-        origin.endsWith('.render.com') ||
-        origin.endsWith('.onrender.com');
+        origin.includes('.run.app') || 
+        origin.includes('.aistudio-preview.app') ||
+        origin.includes('.onrender.com') ||
+        origin.includes('.render.com');
 
       if (!isAllowedOrigin) {
         return;
